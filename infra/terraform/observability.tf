@@ -5,13 +5,13 @@ locals {
     # Model Monitor (native, hourly): completeness of a key history field -> data quality issue
     "credit-pd-data-quality-violations" = {
       namespace = "aws/sagemaker/Endpoints/data-metrics", metric = "feature_non_null_bill_amt1"
-      dims = { Endpoint = "credit-pd-prod", MonitoringSchedule = "credit-pd-data-quality" }
+      dims      = { Endpoint = "credit-pd-prod", MonitoringSchedule = "credit-pd-data-quality" }
       threshold = 0.98, stat = "Minimum", lower = true
     }
     # Model Monitor (native, hourly): distribution distance vs training baseline -> covariate drift
     "credit-pd-feature-drift" = {
       namespace = "aws/sagemaker/Endpoints/data-metrics", metric = "feature_baseline_drift_credit_limit"
-      dims = { Endpoint = "credit-pd-prod", MonitoringSchedule = "credit-pd-data-quality" }
+      dims      = { Endpoint = "credit-pd-prod", MonitoringSchedule = "credit-pd-data-quality" }
       threshold = 0.2, stat = "Maximum"
     }
     # Custom PSI job (monitoring/psi_job.py, `make psi`) -> population shift in the PD score
@@ -20,7 +20,7 @@ locals {
     }
     "credit-pd-model-quality" = {
       namespace = "aws/sagemaker/Endpoints/model-metrics", metric = "auc"
-      dims = { Endpoint = "credit-pd-prod", MonitoringSchedule = "credit-pd-model-quality" }
+      dims      = { Endpoint = "credit-pd-prod", MonitoringSchedule = "credit-pd-model-quality" }
       threshold = 0.70, stat = "Minimum", lower = true
     }
   }
@@ -78,23 +78,23 @@ resource "aws_cloudwatch_dashboard" "ops" {
           ["AWS/SageMaker", "Invocations", "EndpointName", "credit-pd-prod", "VariantName", "champion"],
           [".", "Invocations", ".", ".", ".", "challenger"],
           [".", "Invocation5XXErrors", ".", ".", ".", "champion"],
-        ] } },
+      ] } },
       { type = "metric", x = 8, y = 0, width = 8, height = 6, properties = {
         title = "Latency p95 (ms)", region = var.region, period = 300
         metrics = [
           ["AWS/SageMaker", "ModelLatency", "EndpointName", "credit-pd-prod", "VariantName", "champion", { stat = "p95" }],
           ["CreditPD/API", "Latency", { stat = "p95" }],
-        ] } },
+      ] } },
       { type = "metric", x = 16, y = 0, width = 8, height = 6, properties = {
         title = "Decisions", region = var.region, stat = "Sum", period = 3600
         metrics = [
           ["CreditPD/API", "Decision_APPROVE"], [".", "Decision_MANUAL_REVIEW"], [".", "Decision_DECLINE"], [".", "Fallback"],
-        ] } },
+      ] } },
       { type = "metric", x = 0, y = 6, width = 12, height = 6, properties = {
         title = "Drift", region = var.region, stat = "Maximum", period = 3600
         metrics = [
           ["aws/sagemaker/Endpoints/data-metrics", "feature_baseline_drift_credit_limit", "Endpoint", "credit-pd-prod",
-           "MonitoringSchedule", "credit-pd-data-quality"],
+          "MonitoringSchedule", "credit-pd-data-quality"],
           ["CreditPD/Drift", "ScorePSI"], [".", "MaxFeaturePSI"],
         ]
         annotations = { horizontal = [{ value = 0.1, label = "investigate" }, { value = 0.25, label = "drift" }] }
@@ -102,7 +102,7 @@ resource "aws_cloudwatch_dashboard" "ops" {
       { type = "metric", x = 12, y = 6, width = 12, height = 6, properties = {
         title = "Model quality (matured labels)", region = var.region, stat = "Average", period = 3600
         metrics = [["aws/sagemaker/Endpoints/model-metrics", "auc", "Endpoint", "credit-pd-prod",
-                    "MonitoringSchedule", "credit-pd-model-quality"]]
+        "MonitoringSchedule", "credit-pd-model-quality"]]
       } },
     ]
   })

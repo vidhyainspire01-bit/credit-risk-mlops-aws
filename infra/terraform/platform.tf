@@ -15,7 +15,7 @@ resource "aws_s3_object" "glue_script" {
 resource "aws_iam_role" "glue" {
   name = "${local.name}-glue"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
-    Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "glue.amazonaws.com" } }] })
+  Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "glue.amazonaws.com" } }] })
 }
 
 resource "aws_iam_role_policy_attachment" "glue_service" {
@@ -50,11 +50,11 @@ resource "aws_glue_job" "curate" {
 
 # ---------------- Experiment tracking ----------------
 resource "aws_sagemaker_mlflow_tracking_server" "mlflow" {
-  count                 = var.create_mlflow ? 1 : 0
-  tracking_server_name  = "${local.name}-mlflow"
-  artifact_store_uri    = "s3://${aws_s3_bucket.lake.id}/mlflow"
-  role_arn              = aws_iam_role.sagemaker.arn
-  tracking_server_size  = "Small"
+  count                        = var.create_mlflow ? 1 : 0
+  tracking_server_name         = "${local.name}-mlflow"
+  artifact_store_uri           = "s3://${aws_s3_bucket.lake.id}/mlflow"
+  role_arn                     = aws_iam_role.sagemaker.arn
+  tracking_server_size         = "Small"
   automatic_model_registration = false # registry entries come only from the governed pipeline
 }
 
@@ -63,12 +63,12 @@ locals {
   lambdas = {
     predict_proxy = {
       timeout = 5, memory = 512, env = {
-        ENDPOINT_NAME = "credit-pd-prod", DECISION_LOG_BUCKET = aws_s3_bucket.lake.id
+        ENDPOINT_NAME   = "credit-pd-prod", DECISION_LOG_BUCKET = aws_s3_bucket.lake.id
         THRESHOLD_PARAM = aws_ssm_parameter.thresholds.name, FEATURE_GROUP = "credit-customer-history"
     } }
     approval_dispatch = {
       timeout = 15, memory = 256, env = {
-        GITHUB_REPO = var.github_repo, GITHUB_TOKEN_SECRET = aws_secretsmanager_secret.github_token.name
+        GITHUB_REPO  = var.github_repo, GITHUB_TOKEN_SECRET = aws_secretsmanager_secret.github_token.name
         DEPLOY_GROUP = aws_sagemaker_model_package_group.central.model_package_group_name
     } }
     drift_triage = {
@@ -101,7 +101,7 @@ data "archive_file" "fn" {
 resource "aws_iam_role" "lambda" {
   name = "${local.name}-lambda"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
-    Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "lambda.amazonaws.com" } }] })
+  Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "lambda.amazonaws.com" } }] })
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_basic" {
@@ -115,10 +115,10 @@ resource "aws_iam_role_policy" "lambda" {
     Version = "2012-10-17"
     Statement = [
       { Effect = "Allow", Action = ["sagemaker:InvokeEndpoint", "sagemaker:GetRecord", "sagemaker:ListModelPackages",
-          "sagemaker:DescribeModelPackage", "sagemaker:UpdateModelPackage", "sagemaker:ListPipelineExecutions"],
-        Resource = "*" },
+        "sagemaker:DescribeModelPackage", "sagemaker:UpdateModelPackage", "sagemaker:ListPipelineExecutions"],
+      Resource = "*" },
       { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:ListBucket"],
-        Resource = [aws_s3_bucket.lake.arn, "${aws_s3_bucket.lake.arn}/*"] },
+      Resource = [aws_s3_bucket.lake.arn, "${aws_s3_bucket.lake.arn}/*"] },
       { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = aws_kms_key.ml.arn },
       { Effect = "Allow", Action = ["ssm:GetParameter"], Resource = "arn:aws:ssm:${var.region}:${local.account_id}:parameter/${local.name}/*" },
       { Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = aws_secretsmanager_secret.github_token.arn },
@@ -182,8 +182,8 @@ resource "aws_apigatewayv2_stage" "default" {
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.api.arn
     format = jsonencode({
-      requestId = "$context.requestId", ip = "$context.identity.sourceIp", caller = "$context.identity.caller",
-      route     = "$context.routeKey", status = "$context.status", latencyMs = "$context.responseLatency",
+      requestId            = "$context.requestId", ip = "$context.identity.sourceIp", caller = "$context.identity.caller",
+      route                = "$context.routeKey", status = "$context.status", latencyMs = "$context.responseLatency",
       integrationLatencyMs = "$context.integrationLatency"
     })
   }
@@ -227,7 +227,7 @@ resource "aws_lambda_permission" "approved" {
 resource "aws_iam_role" "sfn" {
   name = "${local.name}-sfn"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
-    Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "states.amazonaws.com" } }] })
+  Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "states.amazonaws.com" } }] })
 }
 
 resource "aws_iam_role_policy" "sfn" {
@@ -236,7 +236,7 @@ resource "aws_iam_role_policy" "sfn" {
     Version = "2012-10-17"
     Statement = [
       { Effect = "Allow", Action = "lambda:InvokeFunction",
-        Resource = [aws_lambda_function.fn["drift_triage"].arn, aws_lambda_function.fn["compare_candidates"].arn] },
+      Resource = [aws_lambda_function.fn["drift_triage"].arn, aws_lambda_function.fn["compare_candidates"].arn] },
       { Effect = "Allow", Action = ["sagemaker:StartPipelineExecution", "sagemaker:DescribePipelineExecution"], Resource = "*" },
       { Effect = "Allow", Action = "sns:Publish", Resource = aws_sns_topic.alerts.arn },
       { Effect = "Allow", Action = ["kms:GenerateDataKey", "kms:Decrypt"], Resource = aws_kms_key.ml.arn },
@@ -269,13 +269,13 @@ resource "aws_sfn_state_machine" "retrain" {
 resource "aws_iam_role" "events_sfn" {
   name = "${local.name}-events-sfn"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
-    Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "events.amazonaws.com" } }] })
+  Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "events.amazonaws.com" } }] })
 }
 
 resource "aws_iam_role_policy" "events_sfn" {
   role = aws_iam_role.events_sfn.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [{
-    Effect = "Allow", Action = "states:StartExecution", Resource = aws_sfn_state_machine.retrain.arn }] })
+  Effect = "Allow", Action = "states:StartExecution", Resource = aws_sfn_state_machine.retrain.arn }] })
 }
 
 resource "aws_cloudwatch_event_rule" "drift" {
@@ -300,14 +300,14 @@ resource "aws_cloudwatch_event_target" "drift" {
 resource "aws_iam_role" "scheduler" {
   name = "${local.name}-scheduler"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
-    Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "scheduler.amazonaws.com" } }] })
+  Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "scheduler.amazonaws.com" } }] })
 }
 
 resource "aws_iam_role_policy" "scheduler" {
   role = aws_iam_role.scheduler.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [{
-    Effect   = "Allow", Action = "lambda:InvokeFunction",
-    Resource = [aws_lambda_function.fn["traffic_generator"].arn, aws_lambda_function.fn["daily_report"].arn] }] })
+    Effect = "Allow", Action = "lambda:InvokeFunction",
+  Resource = [aws_lambda_function.fn["traffic_generator"].arn, aws_lambda_function.fn["daily_report"].arn] }] })
 }
 
 resource "aws_scheduler_schedule" "traffic" {

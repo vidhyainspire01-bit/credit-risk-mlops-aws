@@ -1,6 +1,8 @@
 # One image for processing, training and serving. Built once per commit, deployed by digest.
 # In production: FROM the platform team's golden base image; pip resolves via CodeArtifact.
-FROM public.ecr.aws/docker/library/python:3.11-slim
+# Production: BASE_IMAGE = the platform team's golden image in ECR (scanned, patched).
+ARG BASE_IMAGE=python:3.11-slim
+FROM ${BASE_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 ARG PIP_INDEX_URL=https://pypi.org/simple
