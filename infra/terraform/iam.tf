@@ -7,9 +7,9 @@ resource "aws_iam_openid_connect_provider" "github" {
 
 locals {
   ci_roles = {
-    dev     = "repo:${var.github_repo}:ref:refs/heads/develop"     # integration training only
-    release = "repo:${var.github_repo}:ref:refs/heads/main"        # release training only
-    deploy  = "repo:${var.github_repo}:environment:*"              # deploy jobs run in environments
+    dev     = "repo:${var.github_repo}:ref:refs/heads/develop" # integration training only
+    release = "repo:${var.github_repo}:ref:refs/heads/main"    # release training only
+    deploy  = "repo:${var.github_repo}:environment:*"          # deploy jobs run in environments
     infra   = "repo:${var.github_repo}:*"
   }
 }
@@ -76,9 +76,9 @@ data "aws_iam_policy_document" "sagemaker" {
   }
   statement {
     actions = ["sagemaker:*Model*", "sagemaker:*Processing*", "sagemaker:*Training*", "sagemaker:*Pipeline*",
-               "sagemaker:*FeatureGroup*", "sagemaker:PutRecord", "sagemaker:GetRecord", "sagemaker:AddTags",
-               "sagemaker:*Endpoint*", "sagemaker:*Monitoring*", "sagemaker:*Lineage*", "sagemaker:*Artifact*",
-               "sagemaker:*Context*", "sagemaker:*Action*", "sagemaker:*Association*", "sagemaker:Search"]
+      "sagemaker:*FeatureGroup*", "sagemaker:PutRecord", "sagemaker:GetRecord", "sagemaker:AddTags",
+      "sagemaker:*Endpoint*", "sagemaker:*Monitoring*", "sagemaker:*Lineage*", "sagemaker:*Artifact*",
+    "sagemaker:*Context*", "sagemaker:*Action*", "sagemaker:*Association*", "sagemaker:Search"]
     resources = ["*"]
   }
   statement {
@@ -168,9 +168,9 @@ resource "aws_iam_role_policy" "model_risk" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect   = "Allow"
-      Action   = ["sagemaker:UpdateModelPackage", "sagemaker:DescribeModelPackage", "sagemaker:ListModelPackages",
-                  "sagemaker:DescribeModelPackageGroup", "s3:GetObject", "kms:Decrypt"]
+      Effect = "Allow"
+      Action = ["sagemaker:UpdateModelPackage", "sagemaker:DescribeModelPackage", "sagemaker:ListModelPackages",
+      "sagemaker:DescribeModelPackageGroup", "s3:GetObject", "kms:Decrypt"]
       Resource = "*"
     }]
   })

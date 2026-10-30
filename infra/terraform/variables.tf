@@ -20,7 +20,7 @@ variable "create_mlflow" {
 }
 
 variable "traffic_enabled" {
-  type    = bool
-  default = false
+  type        = bool
+  default     = false
   description = "Set true after the prod endpoint exists (make traffic-on)"
 }

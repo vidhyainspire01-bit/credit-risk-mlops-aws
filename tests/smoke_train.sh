@@ -12,7 +12,7 @@ mkdir -p "$WORK"/processing/input "$WORK"/input/config "$WORK"/input/data
 cp tests/fixtures/credit_sample.csv "$WORK"/processing/input/
 echo '{"num_round": "30", "max_depth": "3", "eta": "0.1"}' > "$WORK"/input/config/hyperparameters.json
 
-run() { docker run --rm -v "$PWD":/w -v "$WORK":/opt/ml -w /w "$IMAGE" "$@"; }
+run() { docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/w -v "$WORK":/opt/ml -w /w "$IMAGE" "$@"; }
 
 echo "== preprocess (out-of-time split, feature re-selection path)"
 run python3 pipelines/steps/preprocess.py --feature-set reselect --sample-weight-decay 0.1
@@ -28,7 +28,7 @@ tar -czf "$WORK"/processing/model/model.tar.gz -C "$WORK"/model .
 run python3 pipelines/steps/evaluate.py
 
 echo "== serve the trained artefact"
-docker run -d --name smoke-svc -p 8081:8080 -v "$WORK"/model:/opt/ml/model "$IMAGE" serve >/dev/null
+docker run -d --name smoke-svc -u "$(id -u):$(id -g)" -p 8081:8080 -v "$WORK"/model:/opt/ml/model "$IMAGE" serve >/dev/null
 trap 'docker rm -f smoke-svc >/dev/null 2>&1; rm -rf "$WORK"' EXIT
 for _ in $(seq 1 20); do curl -sf localhost:8081/ping >/dev/null && break; sleep 1; done
 curl -sf -H "Content-Type: application/json" -d @tests/sample_request.json localhost:8081/invocations | tee "$WORK"/out.json
