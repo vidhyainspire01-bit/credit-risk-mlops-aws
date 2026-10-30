@@ -66,7 +66,7 @@ REASON_CODES = {
     "recent_delinquency": ("R06", "Late payment in the most recent month"),
     "utilization": ("R07", "High utilisation of existing credit limit"),
     "utilization_trend": ("R08", "Rising balance over the last 6 months"),
-    "payment_ratio": ("R09", "Low repayment relative to amount billed"),
+    "payment_ratio": ("R09", "Low repayment relative to the amount billed"),
     "avg_payment_log": ("R10", "Low average repayment amount"),
     "months_zero_payment": ("R11", "Months with no repayment made"),
 }
