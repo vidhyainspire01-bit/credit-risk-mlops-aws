@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY docker/requirements.txt /tmp/requirements.txt
-RUN pip install -r /tmp/requirements.txt
+RUN pip install --upgrade pip setuptools wheel && pip install -r /tmp/requirements.txt
 
 # Shared feature library (same code in training and serving)
 COPY src /opt/src
