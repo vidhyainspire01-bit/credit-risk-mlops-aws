@@ -43,12 +43,12 @@ jobs:
         with: {image-ref: "credit-pd:${{ github.sha }}", severity: "HIGH,CRITICAL", exit-code: "1", ignore-unfixed: true}
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
-      - run: pip install numpy==1.26.4 xgboost==2.1.1
+      - run: pip install numpy==1.26.4 pandas==2.2.2 xgboost==2.1.1
       - name: Container contract test (local serve)
         run: |
           mkdir -p /tmp/model && python3 tests/make_tiny_model.py /tmp/model
           docker run -d --name svc -p 8080:8080 -v /tmp/model:/opt/ml/model credit-pd:${{ github.sha }} serve
-          sleep 5
+          for _ in $(seq 1 20); do curl -sf localhost:8080/ping >/dev/null && break; sleep 1; done
           curl -sf localhost:8080/ping
           curl -sf -H "Content-Type: application/json" -d @tests/sample_request.json localhost:8080/invocations | tee /tmp/out.json
           python3 -c "import json; d=json.load(open('/tmp/out.json')); assert 0<=d['pd']<=1 and 'reason_codes' in d"
