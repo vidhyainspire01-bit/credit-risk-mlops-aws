@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+.image_uri
+.glue_run
+staging_checks.json
+infra/terraform/.terraform/
+infra/terraform/.build/
+infra/terraform/*.tfstate*
+infra/terraform/backend.hcl
+infra/terraform/demo.tfvars
+tests/fixtures/
+tests/golden.jsonl
+.ruff_cache/

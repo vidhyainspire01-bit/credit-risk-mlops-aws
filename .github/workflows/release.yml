@@ -1,0 +1,53 @@
+name: release-training
+# Merge to main: release pipeline on production data, registers to the CENTRAL group
+# as PendingManualApproval. Training never deploys anything.
+on:
+  push:
+    branches: [main]
+    paths: ["src/**", "pipelines/**", "serving/**", "docker/**", "config/**"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: write
+
+concurrency: {group: release-training, cancel-in-progress: false}
+
+jobs:
+  train-release:
+    if: vars.AWS_REGION != ''   # skipped until the AWS account is connected (repo variables set)
+    runs-on: ubuntu-latest
+    environment: release
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ARTIFACT_BUCKET: ${{ vars.ARTIFACT_BUCKET }}
+      SAGEMAKER_ROLE_ARN: ${{ vars.SAGEMAKER_ROLE_ARN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CI_RELEASE_ROLE_ARN }}   # trust policy: refs/heads/main only
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+      - name: Build and push release image
+        id: img
+        run: |
+          IMG=${{ steps.ecr.outputs.registry }}/credit-pd:${{ github.sha }}
+          docker build -f docker/Dockerfile -t $IMG .
+          docker push $IMG
+          echo "uri=$(docker inspect --format='{{index .RepoDigests 0}}' $IMG)" >> $GITHUB_OUTPUT
+      - name: SBOM for the release image
+        uses: anchore/sbom-action@v0
+        with: {image: "${{ steps.img.outputs.uri }}", format: spdx-json, output-file: sbom.spdx.json}
+      - run: aws s3 cp sbom.spdx.json s3://$ARTIFACT_BUCKET/sbom/${{ github.sha }}.spdx.json
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r requirements-dev.txt sagemaker && pip install ./src
+      - name: Run release pipeline and wait
+        env: {IMAGE_URI: "${{ steps.img.outputs.uri }}"}
+        run: python scripts/run_pipeline.py --env release --wait
+      - name: Tag release
+        run: |
+          git tag "train-${{ github.run_number }}-${GITHUB_SHA::7}"
+          git push origin --tags

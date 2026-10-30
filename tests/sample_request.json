@@ -1,0 +1,6 @@
+{
+  "credit_limit": 50000, "education": 2, "age": 35,
+  "pay_0": 2, "pay_2": 2, "pay_3": 0, "pay_4": 0, "pay_5": 0, "pay_6": 0,
+  "bill_amt1": 46000, "bill_amt2": 45000, "bill_amt3": 43000, "bill_amt4": 30000, "bill_amt5": 28000, "bill_amt6": 25000,
+  "pay_amt1": 0, "pay_amt2": 1500, "pay_amt3": 1000, "pay_amt4": 1000, "pay_amt5": 1000, "pay_amt6": 800
+}

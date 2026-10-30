@@ -1,0 +1,49 @@
+# One pipeline definition, behaviour changed only by environment parameters.
+# Used by scripts/run_pipeline.py and the GitHub workflows.
+
+common:
+  pipeline_name: credit-pd-training
+  target: default_next_month
+  oot_months: [11, 12]          # synthetic application months held out as out-of-time
+  ks_floor: 0.30                # absolute minimum KS on OOT
+  champion_tolerance: 0.01      # challenger KS may be at most this much below champion
+  bias_dppl_max: 0.10           # Clarify DPPL tolerance on facet "sex"
+  hyperparameters:
+    max_depth: 4
+    eta: 0.05
+    num_round: 400
+    subsample: 0.8
+    colsample_bytree: 0.8
+    min_child_weight: 20
+    eval_metric: auc
+
+environments:
+  smoke:                        # optional: full Pipelines DAG in local mode (needs AWS credentials); CI uses tests/smoke_train.sh
+    local_mode: true
+    sample_fraction: 0.02
+    num_round: 10
+    run_clarify: false
+    model_package_group: null   # never registers
+  dev:                          # merge to develop
+    local_mode: false
+    sample_fraction: 1.0
+    instance_type: ml.m5.large
+    use_spot: true
+    run_clarify: true
+    model_package_group: credit-pd-dev
+    approval_status: Approved
+  release:                      # merge to main / release tag
+    local_mode: false
+    sample_fraction: 1.0
+    instance_type: ml.m5.large
+    use_spot: true
+    run_clarify: true
+    model_package_group: credit-pd
+    approval_status: PendingManualApproval
+
+# Retraining strategy matrix used by Step Functions (drift-driven retraining).
+retrain_candidates:
+  C1_refresh:      {train_months: "1-10", feature_set: champion, sample_weight_decay: 0.0}
+  C2_recent:       {train_months: "5-10", feature_set: champion, sample_weight_decay: 0.0}
+  C3_time_decay:   {train_months: "1-10", feature_set: champion, sample_weight_decay: 0.15}
+  C4_reselect:     {train_months: "1-10", feature_set: reselect, sample_weight_decay: 0.0}

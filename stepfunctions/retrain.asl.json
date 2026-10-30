@@ -1,0 +1,92 @@
+{
+  "Comment": "Drift-driven retraining: triage -> parallel candidate pipelines -> compare -> one PendingManualApproval version. Never deploys.",
+  "StartAt": "Triage",
+  "States": {
+    "Triage": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {"FunctionName": "${triage_lambda_arn}", "Payload.$": "$"},
+      "ResultSelector": {"triage.$": "$.Payload"},
+      "ResultPath": "$",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException", "Lambda.TooManyRequestsException"], "MaxAttempts": 3, "BackoffRate": 2}],
+      "Next": "Decide"
+    },
+    "Decide": {
+      "Type": "Choice",
+      "Choices": [{"Variable": "$.triage.action", "StringEquals": "retrain", "Next": "RunCandidates"}],
+      "Default": "NotifyOnly"
+    },
+    "NotifyOnly": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${sns_topic_arn}",
+        "Subject": "Credit PD drift: no retrain",
+        "Message.$": "States.Format('Drift type: {}. {}', $.triage.drift_type, $.triage.message)"
+      },
+      "End": true
+    },
+    "RunCandidates": {
+      "Type": "Map",
+      "ItemsPath": "$.triage.candidates",
+      "MaxConcurrency": 4,
+      "ResultPath": "$.candidate_runs",
+      "ItemProcessor": {
+        "ProcessorConfig": {"Mode": "INLINE"},
+        "StartAt": "StartPipeline",
+        "States": {
+          "StartPipeline": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:sagemaker:startPipelineExecution",
+            "Parameters": {
+              "PipelineName": "${pipeline_name}",
+              "PipelineExecutionDisplayName.$": "$.display_name",
+              "PipelineParameters.$": "$.params"
+            },
+            "ResultSelector": {"arn.$": "$.PipelineExecutionArn"},
+            "Next": "WaitForPipeline"
+          },
+          "WaitForPipeline": {"Type": "Wait", "Seconds": 120, "Next": "CheckPipeline"},
+          "CheckPipeline": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:sagemaker:describePipelineExecution",
+            "Parameters": {"PipelineExecutionArn.$": "$.arn"},
+            "ResultSelector": {"arn.$": "$.PipelineExecutionArn", "status.$": "$.PipelineExecutionStatus"},
+            "Next": "PipelineDone?"
+          },
+          "PipelineDone?": {
+            "Type": "Choice",
+            "Choices": [
+              {"Variable": "$.status", "StringEquals": "Executing", "Next": "WaitForPipeline"},
+              {"Variable": "$.status", "StringEquals": "Stopping", "Next": "WaitForPipeline"}
+            ],
+            "Default": "CandidateFinished"
+          },
+          "CandidateFinished": {"Type": "Pass", "End": true}
+        }
+      },
+      "Next": "CompareCandidates"
+    },
+    "CompareCandidates": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${compare_lambda_arn}",
+        "Payload": {"started_at.$": "$.triage.started_at", "triage.$": "$.triage", "runs.$": "$.candidate_runs"}
+      },
+      "ResultSelector": {"result.$": "$.Payload"},
+      "ResultPath": "$.selection",
+      "Next": "NotifyModelRisk"
+    },
+    "NotifyModelRisk": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${sns_topic_arn}",
+        "Subject": "Credit PD retrain: candidate awaiting Model Risk approval",
+        "Message.$": "States.JsonToString($.selection.result)"
+      },
+      "End": true
+    }
+  }
+}

@@ -1,0 +1,157 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Credit PD real-time endpoint, deployed FROM a Model Registry version (never a raw S3 path).
+  Modes: single | shadow | ab. Updates use blue/green canary with CloudWatch-alarm auto-rollback.
+
+Parameters:
+  EnvName:            {Type: String, AllowedValues: [staging, prod]}
+  ModelPackageArn:    {Type: String, Description: "Champion / primary registry version"}
+  ChallengerPackageArn: {Type: String, Default: "", Description: "Used in shadow and ab modes"}
+  Mode:               {Type: String, Default: single, AllowedValues: [single, shadow, ab]}
+  ChallengerWeight:   {Type: Number, Default: 20, Description: "Percent of traffic to challenger in ab mode"}
+  InstanceType:       {Type: String, Default: ml.m5.large}
+  InstanceCount:      {Type: Number, Default: 1}
+  ExecutionRoleArn:   {Type: String}
+  KmsKeyArn:          {Type: String}
+  CaptureS3Uri:       {Type: String}
+  CanaryPercent:      {Type: Number, Default: 10}
+  BakeSeconds:        {Type: Number, Default: 600}
+
+Conditions:
+  HasChallenger: !Not [!Equals [!Ref ChallengerPackageArn, ""]]
+  IsAB:     !And [!Equals [!Ref Mode, ab], !Condition HasChallenger]
+  IsShadow: !And [!Equals [!Ref Mode, shadow], !Condition HasChallenger]
+  IsProd:   !Equals [!Ref EnvName, prod]
+
+Resources:
+  ChampionModel:
+    Type: AWS::SageMaker::Model
+    Properties:
+      ExecutionRoleArn: !Ref ExecutionRoleArn
+      EnableNetworkIsolation: true   # container has no network: model is self-contained, no exfiltration path
+      PrimaryContainer:
+        ModelPackageName: !Ref ModelPackageArn
+        Environment: {MODEL_VERSION: !Ref ModelPackageArn, WORKERS: "2"}
+      Tags: [{Key: Project, Value: credit-pd-demo}, {Key: Env, Value: !Ref EnvName}]
+
+  ChallengerModel:
+    Type: AWS::SageMaker::Model
+    Condition: HasChallenger
+    Properties:
+      ExecutionRoleArn: !Ref ExecutionRoleArn
+      EnableNetworkIsolation: true
+      PrimaryContainer:
+        ModelPackageName: !Ref ChallengerPackageArn
+        Environment: {MODEL_VERSION: !Ref ChallengerPackageArn, WORKERS: "2"}
+      Tags: [{Key: Project, Value: credit-pd-demo}, {Key: Env, Value: !Ref EnvName}]
+
+  EndpointConfig:
+    Type: AWS::SageMaker::EndpointConfig
+    Properties:
+      KmsKeyId: !Ref KmsKeyArn
+      ProductionVariants:
+        - VariantName: champion
+          ModelName: !GetAtt ChampionModel.ModelName
+          InstanceType: !Ref InstanceType
+          InitialInstanceCount: !Ref InstanceCount
+          InitialVariantWeight: !If [IsAB, !Ref "AWS::NoValue", 1]
+        - !If
+          - IsAB
+          - VariantName: challenger
+            ModelName: !GetAtt ChallengerModel.ModelName
+            InstanceType: !Ref InstanceType
+            InitialInstanceCount: 1
+            InitialVariantWeight: !Ref ChallengerWeight
+          - !Ref "AWS::NoValue"
+      ShadowProductionVariants: !If
+        - IsShadow
+        - - VariantName: shadow
+            ModelName: !GetAtt ChallengerModel.ModelName
+            InstanceType: !Ref InstanceType
+            InitialInstanceCount: 1
+            InitialVariantWeight: 1
+        - !Ref "AWS::NoValue"
+      DataCaptureConfig:
+        EnableCapture: true
+        InitialSamplingPercentage: 100
+        DestinationS3Uri: !Ref CaptureS3Uri
+        KmsKeyId: !Ref KmsKeyArn
+        CaptureOptions: [{CaptureMode: Input}, {CaptureMode: Output}]
+        CaptureContentTypeHeader: {JsonContentTypes: [application/json]}
+      Tags: [{Key: Project, Value: credit-pd-demo}, {Key: Env, Value: !Ref EnvName}]
+
+  Endpoint:
+    Type: AWS::SageMaker::Endpoint
+    Properties:
+      EndpointName: !Sub credit-pd-${EnvName}
+      EndpointConfigName: !GetAtt EndpointConfig.EndpointConfigName
+      DeploymentConfig:
+        BlueGreenUpdatePolicy:
+          TrafficRoutingConfiguration:
+            Type: CANARY
+            CanarySize: {Type: CAPACITY_PERCENT, Value: !Ref CanaryPercent}
+            WaitIntervalInSeconds: 300
+          TerminationWaitInSeconds: 120
+          MaximumExecutionTimeoutInSeconds: 3600
+        AutoRollbackConfiguration:
+          Alarms:
+            - AlarmName: !Ref ErrorAlarm
+            - AlarmName: !Ref LatencyAlarm
+      Tags: [{Key: Project, Value: credit-pd-demo}, {Key: Env, Value: !Ref EnvName}]
+
+  # Alarms used for automatic rollback during the canary bake, and for paging afterwards.
+  ErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub credit-pd-${EnvName}-5xx
+      Namespace: AWS/SageMaker
+      MetricName: Invocation5XXErrors
+      Dimensions: [{Name: EndpointName, Value: !Sub "credit-pd-${EnvName}"}, {Name: VariantName, Value: champion}]
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  LatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub credit-pd-${EnvName}-latency
+      Namespace: AWS/SageMaker
+      MetricName: ModelLatency
+      Dimensions: [{Name: EndpointName, Value: !Sub "credit-pd-${EnvName}"}, {Name: VariantName, Value: champion}]
+      ExtendedStatistic: p95
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 200000   # microseconds = 200 ms model latency (API budget 300 ms end to end)
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  ScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: IsProd
+    DependsOn: Endpoint
+    Properties:
+      ServiceNamespace: sagemaker
+      ResourceId: !Sub endpoint/credit-pd-${EnvName}/variant/champion
+      ScalableDimension: sagemaker:variant:DesiredInstanceCount
+      MinCapacity: !Ref InstanceCount
+      MaxCapacity: 3
+
+  ScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: IsProd
+    Properties:
+      PolicyName: credit-pd-invocations-per-instance
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 300
+        PredefinedMetricSpecification: {PredefinedMetricType: SageMakerVariantInvocationsPerInstance}
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 60
+
+Outputs:
+  EndpointName: {Value: !GetAtt Endpoint.EndpointName}
+  Mode: {Value: !Ref Mode}

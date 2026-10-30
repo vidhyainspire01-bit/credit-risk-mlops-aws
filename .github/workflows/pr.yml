@@ -1,0 +1,70 @@
+name: pr-validation
+# G2: every PR into develop or main. Fast, cheap, no registration.
+on:
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r requirements-dev.txt && pip install ./src
+      - name: Lint and format
+        run: ruff check . && black --check .
+      - name: Unit tests with coverage gate
+        run: pytest tests -q --cov=credit_features --cov-fail-under=80
+      - name: Experiment evidence present
+        env: {BODY: "${{ github.event.pull_request.body }}"}
+        run: |
+          echo "$BODY" | grep -Eq "MLflow run: ([a-f0-9]{8,}|n/a)" || { echo "PR body must contain 'MLflow run: <id>' (or 'MLflow run: n/a' for non-model changes)"; exit 1; }
+
+  iac-and-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Terraform fmt and validate
+        working-directory: infra/terraform
+        run: terraform fmt -check -recursive && terraform init -backend=false && terraform validate
+      - name: Checkov IaC scan (hard gate; accepted risks documented in .checkov.yaml)
+        uses: bridgecrewio/checkov-action@v12
+        with: {directory: ., config_file: .checkov.yaml}
+      - name: Build image
+        run: docker build -f docker/Dockerfile -t credit-pd:${{ github.sha }} .
+      - name: Trivy image scan (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.24.0
+        with: {image-ref: "credit-pd:${{ github.sha }}", severity: "HIGH,CRITICAL", exit-code: "1", ignore-unfixed: true}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install numpy==1.26.4 xgboost==2.1.1
+      - name: Container contract test (local serve)
+        run: |
+          mkdir -p /tmp/model && python3 tests/make_tiny_model.py /tmp/model
+          docker run -d --name svc -p 8080:8080 -v /tmp/model:/opt/ml/model credit-pd:${{ github.sha }} serve
+          sleep 5
+          curl -sf localhost:8080/ping
+          curl -sf -H "Content-Type: application/json" -d @tests/sample_request.json localhost:8080/invocations | tee /tmp/out.json
+          python3 -c "import json; d=json.load(open('/tmp/out.json')); assert 0<=d['pd']<=1 and 'reason_codes' in d"
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: text/csv' -d '1,2' localhost:8080/invocations)" = "400"
+
+  smoke-training:
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install numpy==1.26.4 pandas==2.2.2
+      - name: Synthetic fixture (no real data in the repo)
+        run: python tests/make_fixture.py
+      - name: Build the image SageMaker will run
+        run: docker build -f docker/Dockerfile -t credit-pd:smoke .
+      - name: Smoke training - preprocess, train, evaluate, serve in the SageMaker /opt/ml contract
+        run: bash tests/smoke_train.sh credit-pd:smoke

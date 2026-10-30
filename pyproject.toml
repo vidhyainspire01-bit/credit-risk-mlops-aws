@@ -1,0 +1,21 @@
+# Repo-wide tooling config (the installable feature library has its own src/pyproject.toml)
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["data/glue"]   # Glue job runs on the Glue runtime (awsglue imports)
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B905", "E501"]   # black owns line length; long URLs and f-strings are allowed
+
+[tool.ruff.lint.isort]
+known-first-party = ["credit_features", "pipelines", "inference"]
+
+[tool.black]
+line-length = 120
+target-version = ["py311"]
+extend-exclude = "data/glue"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

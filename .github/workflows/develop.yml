@@ -1,0 +1,45 @@
+name: develop-integration-training
+# Merge to develop: full pipeline, full volume, registers to the DEV group only.
+on:
+  push:
+    branches: [develop]
+    paths: ["src/**", "pipelines/**", "serving/**", "docker/**", "config/**"]
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency: {group: develop-training, cancel-in-progress: false}
+
+jobs:
+  train-dev:
+    if: vars.AWS_REGION != ''   # skipped until the AWS account is connected (repo variables set)
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ARTIFACT_BUCKET: ${{ vars.ARTIFACT_BUCKET }}
+      SAGEMAKER_ROLE_ARN: ${{ vars.SAGEMAKER_ROLE_ARN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CI_DEV_ROLE_ARN }}   # trust policy: refs/heads/develop only
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+      - name: Build and push image (tag = commit SHA, deploy by digest)
+        id: img
+        run: |
+          IMG=${{ steps.ecr.outputs.registry }}/credit-pd:${{ github.sha }}
+          docker build -f docker/Dockerfile -t $IMG .
+          docker push $IMG
+          echo "uri=$(docker inspect --format='{{index .RepoDigests 0}}' $IMG)" >> $GITHUB_OUTPUT
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r requirements-dev.txt sagemaker && pip install ./src
+      - name: Run dev pipeline and wait
+        env: {IMAGE_URI: "${{ steps.img.outputs.uri }}"}
+        run: |
+          RUN_ID=$(git log -1 --pretty=%B | grep -oE 'MLflow run: [a-f0-9]+' | cut -d' ' -f3 || true)
+          python scripts/run_pipeline.py --env dev --wait --mlflow-run-id "${RUN_ID:-none}"

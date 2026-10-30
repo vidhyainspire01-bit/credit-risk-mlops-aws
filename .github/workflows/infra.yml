@@ -1,0 +1,46 @@
+name: infra
+on:
+  pull_request:
+    paths: ["infra/terraform/**"]
+  push:
+    branches: [main]
+    paths: ["infra/terraform/**"]
+  schedule:
+    - cron: "30 1 * * *"   # nightly drift detection (plan only)
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    if: vars.AWS_REGION != ''   # skipped until the AWS account is connected (repo variables set)
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: infra/terraform}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - uses: aws-actions/configure-aws-credentials@v4
+        with: {role-to-assume: "${{ vars.CI_INFRA_PLAN_ROLE_ARN }}", aws-region: "${{ vars.AWS_REGION }}"}
+      - run: terraform init -backend-config=backend.hcl
+      - run: terraform plan -detailed-exitcode -out=tfplan -var-file=demo.tfvars
+        id: plan
+        continue-on-error: true
+      - name: Fail on drift during scheduled run
+        if: github.event_name == 'schedule' && steps.plan.outputs.exitcode == '2'
+        run: echo "Infrastructure drift detected" && exit 1
+
+  apply:
+    if: github.event_name == 'push'
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: infra-prod    # manual approval
+    defaults: {run: {working-directory: infra/terraform}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - uses: aws-actions/configure-aws-credentials@v4
+        with: {role-to-assume: "${{ vars.CI_INFRA_APPLY_ROLE_ARN }}", aws-region: "${{ vars.AWS_REGION }}"}
+      - run: terraform init -backend-config=backend.hcl
+      - run: terraform apply -auto-approve -var-file=demo.tfvars

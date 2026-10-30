@@ -1,0 +1,5 @@
+# Changes to infrastructure, serving, workflows and accepted risks need platform review.
+/infra/          @vidhyainspire01-bit
+/serving/        @vidhyainspire01-bit
+/.github/        @vidhyainspire01-bit
+/.checkov.yaml   @vidhyainspire01-bit

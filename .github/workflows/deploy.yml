@@ -1,0 +1,84 @@
+name: deploy
+# Triggered by Model Registry approval (EventBridge -> Lambda -> repository_dispatch),
+# or manually to switch prod mode (shadow / ab / single).
+on:
+  repository_dispatch:
+    types: [model-approved]
+  workflow_dispatch:
+    inputs:
+      model_package_arn: {description: "Registry version to deploy", required: true}
+      mode: {description: "Prod mode", type: choice, options: [single, shadow, ab], default: single}
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency: {group: deploy, cancel-in-progress: false}
+
+env:
+  PKG: ${{ github.event.client_payload.model_package_arn || inputs.model_package_arn }}
+  MODE: ${{ inputs.mode || 'shadow' }}
+
+jobs:
+  staging:
+    if: vars.AWS_REGION != ''   # skipped until the AWS account is connected (repo variables set)
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with: {role-to-assume: "${{ vars.CI_DEPLOY_ROLE_ARN }}", aws-region: "${{ vars.AWS_REGION }}"}
+      - name: Verify the version is Approved in the central registry
+        run: |
+          S=$(aws sagemaker describe-model-package --model-package-name "$PKG" --query ModelApprovalStatus --output text)
+          test "$S" = "Approved" || { echo "Refusing to deploy: status=$S"; exit 1; }
+      - name: Deploy staging endpoint from registry version (CloudFormation)
+        run: |
+          aws cloudformation deploy --stack-name credit-pd-endpoint-staging \
+            --template-file serving/cfn/endpoint.yaml --no-fail-on-empty-changeset \
+            --parameter-overrides EnvName=staging ModelPackageArn="$PKG" Mode=single \
+              ExecutionRoleArn=${{ vars.SAGEMAKER_ROLE_ARN }} KmsKeyArn=${{ vars.KMS_KEY_ARN }} \
+              CaptureS3Uri=s3://${{ vars.ARTIFACT_BUCKET }}/datacapture/staging \
+            --tags Project=credit-pd-demo Env=staging
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install boto3 numpy xgboost==2.1.1 pandas
+      - name: G4 pre-deployment checks (parity, contract, load)
+        run: python scripts/staging_checks.py --endpoint credit-pd-staging --model-package-arn "$PKG"
+      - uses: actions/upload-artifact@v4
+        with: {name: staging-checks, path: staging_checks.json}
+
+  prod:
+    needs: staging
+    runs-on: ubuntu-latest
+    environment: prod          # required reviewer = CAB approval
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with: {role-to-assume: "${{ vars.CI_DEPLOY_ROLE_ARN }}", aws-region: "${{ vars.AWS_REGION }}"}
+      - name: Resolve current champion
+        id: champ
+        run: |
+          CUR=$(aws cloudformation describe-stacks --stack-name credit-pd-endpoint-prod \
+                --query "Stacks[0].Parameters[?ParameterKey=='ModelPackageArn'].ParameterValue" --output text 2>/dev/null || echo "")
+          echo "arn=$CUR" >> $GITHUB_OUTPUT
+      - name: Deploy prod (first release = single; later = shadow/ab with new version as challenger)
+        run: |
+          CHAMP="${{ steps.champ.outputs.arn }}"
+          if [ -z "$CHAMP" ] || [ "$CHAMP" = "None" ] || [ "$MODE" = "single" ]; then
+            ARGS="ModelPackageArn=$PKG Mode=single ChallengerPackageArn="
+          else
+            ARGS="ModelPackageArn=$CHAMP ChallengerPackageArn=$PKG Mode=$MODE"
+          fi
+          aws cloudformation deploy --stack-name credit-pd-endpoint-prod \
+            --template-file serving/cfn/endpoint.yaml --no-fail-on-empty-changeset \
+            --parameter-overrides EnvName=prod $ARGS \
+              ExecutionRoleArn=${{ vars.SAGEMAKER_ROLE_ARN }} KmsKeyArn=${{ vars.KMS_KEY_ARN }} \
+              CaptureS3Uri=s3://${{ vars.ARTIFACT_BUCKET }}/datacapture/prod \
+            --tags Project=credit-pd-demo Env=prod
+      - name: Record release in model inventory
+        run: |
+          aws dynamodb put-item --table-name credit-pd-model-inventory --item "{
+            \"model_package_arn\": {\"S\": \"$PKG\"}, \"deployed_at\": {\"S\": \"$(date -u +%FT%TZ)\"},
+            \"env\": {\"S\": \"prod\"}, \"mode\": {\"S\": \"$MODE\"}, \"risk_tier\": {\"S\": \"1\"},
+            \"git_sha\": {\"S\": \"${{ github.sha }}\"}, \"approved_by_run\": {\"S\": \"${{ github.run_id }}\"}}"

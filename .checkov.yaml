@@ -1,0 +1,37 @@
+# Checkov runs as a HARD gate in pr.yml. Every skip below is an accepted risk for this POC,
+# with the production control that replaces it. Adding a skip needs a reviewer (CODEOWNERS).
+compact: true
+quiet: true
+framework:
+  - terraform
+  - cloudformation
+  - github_actions
+skip-check:
+  # --- Networking: POC uses public AWS endpoints; production runs Lambdas and jobs in private subnets with VPC endpoints
+  - CKV_AWS_117   # Lambda inside a VPC
+  # --- IAM breadth: one account, demo roles; production = one role per account, actions scoped to resource ARNs
+  - CKV_AWS_111   # IAM write without constraints
+  - CKV_AWS_109   # IAM permissions management without constraints
+  - CKV_AWS_356   # "*" resource in policy document
+  - CKV_AWS_355   # "*" resource for restrictable actions
+  - CKV_AWS_290   # IAM write access without constraints
+  - CKV_AWS_288   # IAM data exfiltration
+  - CKV_AWS_274   # AdministratorAccess on the Terraform apply role; production = permission boundary
+  # --- Lambda hardening: new AWS accounts have a concurrency limit of 10, so reserved concurrency would fail to apply
+  - CKV_AWS_115   # reserved concurrency
+  - CKV_AWS_116   # DLQ: async invokes are EventBridge/Scheduler, which retry; production adds an SQS DLQ
+  - CKV_AWS_272   # code signing: production signs Lambda zips with AWS Signer
+  # --- Storage extras outside POC scope
+  - CKV_AWS_18    # S3 access logging: production ships to a central log-archive account
+  - CKV_AWS_144   # S3 cross-region replication: production DR to ap-south-2 (Hyderabad)
+  - CKV2_AWS_62   # S3 event notifications
+  - CKV2_AWS_61   # lifecycle on the Terraform state bucket (state history is kept on purpose)
+  - CKV_AWS_119   # Terraform lock table with an AWS-owned key (holds no data)
+  - CKV_AWS_28    # PITR on the Terraform lock table (holds no data); enabled on the model inventory
+  # --- Config and secrets
+  - CKV2_AWS_34   # SSM parameters hold policy thresholds, not secrets; production uses AppConfig
+  - CKV2_AWS_57   # GitHub token rotation: production uses a GitHub App with short-lived tokens
+  - CKV_AWS_297   # Scheduler schedules carry no data; payload-free targets
+  - CKV_AWS_195   # Glue security configuration: data is SSE-KMS at the bucket level; production adds job-level config
+  # --- CI
+  - CKV_GHA_7     # deploy.yml manual inputs (version ARN, mode) are intentional and gated by the prod environment approval

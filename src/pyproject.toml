@@ -1,0 +1,14 @@
+[project]
+name = "credit-features"
+version = "0.1.0"
+description = "Shared feature logic for the credit PD model (training + serving)"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "pandas>=2.1"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["credit_features*"]
